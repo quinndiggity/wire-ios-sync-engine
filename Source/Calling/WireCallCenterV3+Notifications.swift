@@ -165,7 +165,11 @@ class VoiceChannelParticipantV3Snapshot {
         let changeInfo = SetChangeInfo(observedObject: conversationId as NSUUID,
                                        changeSet: changedIndexes,
                                        orderedSetState: NSOrderedSet())
-        VoiceChannelParticipantNotification(setChangeInfo: changeInfo, conversationId: conversationId).post()
+        
+        DispatchQueue.main.async { [weak self] in
+            guard let `self` = self else { return }
+            VoiceChannelParticipantNotification(setChangeInfo: changeInfo, conversationId: self.conversationId).post()
+        }
     }
     
     private static func sort(participants : [CallMember], selfUserID: UUID) -> (all: [UUID], connected: [UUID]) {
@@ -207,7 +211,11 @@ class VoiceChannelParticipantV3Snapshot {
         else { return}
         
         state = newStateUpdate.newSnapshot
-        VoiceChannelParticipantNotification(setChangeInfo: newStateUpdate.changeInfo, conversationId: conversationId).post()
+        
+        DispatchQueue.main.async { [weak self] in
+            guard let `self` = self else { return }
+            VoiceChannelParticipantNotification(setChangeInfo: newStateUpdate.changeInfo, conversationId: self.conversationId).post()
+        }
         
     }
     
