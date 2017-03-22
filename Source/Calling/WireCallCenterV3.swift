@@ -303,6 +303,34 @@ public func GroupMemberHandler(conversationIdRef: UnsafePointer<Int8>?, callMemb
 }
 
 
+struct WireCallCenterMissedCallNotification {
+
+static let notificationName = Notification.Name("WireCallCenterMissedCallNotification")
+static let userInfoKey = notificationName.rawValue
+
+let conversationId : UUID
+let userId : UUID
+let timestamp: Date
+let video: Bool
+
+}
+
+/// MARK - CBR observer
+
+public protocol WireCallCenterCBRCallObserver : class {
+    func callCenterCallIsCBR()
+}
+
+struct WireCallCenterCBRCallNotification {
+    static let notificationName = Notification.Name("WireCallCenterCBRCallNotification")
+    static let userInfoKey = notificationName.rawValue
+    
+    func post() {
+        NotificationCenter.default.post(name: WireCallCenterCBRCallNotification.notificationName,
+                                        object: nil,
+                                        userInfo: [WireCallCenterCBRCallNotification.userInfoKey : self])
+    }
+}
 
 /// MARK - Call center transport
 
@@ -325,6 +353,9 @@ private typealias WireCallMessageToken = UnsafeMutableRawPointer
     
     /// The selfUser remoteIdentifier
     fileprivate let selfUserId : UUID
+
+    @objc public static let cbrNotificationName = WireCallCenterCBRCallNotification.notificationName
+
     
     /// activeInstance - Currenly active instance of the WireCallCenter.
     public private(set) static weak var activeInstance : WireCallCenterV3?
@@ -351,6 +382,12 @@ private typealias WireCallMessageToken = UnsafeMutableRawPointer
     
     var avsWrapper : AVSWrapperType!
     
+    public var useAudioConstantBitRate: Bool = false {
+        didSet {
+            wcall_enable_audio_cbr(useAudioConstantBitRate ? 1 : 0)
+        }
+    }
+    
     deinit {
         avsWrapper.close()
     }
@@ -365,7 +402,14 @@ private typealias WireCallMessageToken = UnsafeMutableRawPointer
         
         let observer = Unmanaged.passUnretained(self).toOpaque()
         self.avsWrapper = avsWrapper ?? AVSWrapper(userId: userId, clientId: clientId, observer: observer)
-        
+
+        // TODO Sabine
+        wcall_set_audio_cbr_enabled_handler({ _ in
+            DispatchQueue.main.async {
+                WireCallCenterCBRCallNotification().post()
+            }
+        })
+    
         WireCallCenterV3.activeInstance = self
     }
     
