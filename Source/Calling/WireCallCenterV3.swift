@@ -303,17 +303,6 @@ public func GroupMemberHandler(conversationIdRef: UnsafePointer<Int8>?, callMemb
 }
 
 
-struct WireCallCenterMissedCallNotification {
-
-static let notificationName = Notification.Name("WireCallCenterMissedCallNotification")
-static let userInfoKey = notificationName.rawValue
-
-let conversationId : UUID
-let userId : UUID
-let timestamp: Date
-let video: Bool
-
-}
 
 /// MARK - CBR observer
 
@@ -404,11 +393,11 @@ private typealias WireCallMessageToken = UnsafeMutableRawPointer
         self.avsWrapper = avsWrapper ?? AVSWrapper(userId: userId, clientId: clientId, observer: observer)
 
         // TODO Sabine
-        wcall_set_audio_cbr_enabled_handler({ _ in
-            DispatchQueue.main.async {
-                WireCallCenterCBRCallNotification().post()
-            }
-        })
+//        wcall_set_audio_cbr_enabled_handler({ _ in
+//            DispatchQueue.main.async {
+//                WireCallCenterCBRCallNotification().post()
+//            }
+//        })
     
         WireCallCenterV3.activeInstance = self
     }

@@ -69,7 +69,7 @@ public protocol WireCallCenterMissedCallObserver : class {
 }
 
 public struct WireCallCenterMissedCallNotification : SelfPostingNotification {
-    static let notificationName = Notification.Name("WireCallCenterNotification")
+    static let notificationName = Notification.Name("WireCallCenterMissedCallNotification")
     
     let conversationId : UUID
     let userId : UUID
@@ -163,7 +163,8 @@ class VoiceChannelParticipantV3Snapshot {
                                               end: ZMOrderedSetState(orderedSet: NSOrderedSet(array: callParticipantState)),
                                               updatedState: ZMOrderedSetState(orderedSet: NSOrderedSet()))!
         let changeInfo = SetChangeInfo(observedObject: conversationId as NSUUID,
-                                       changeSet: changedIndexes)
+                                       changeSet: changedIndexes,
+                                       orderedSetState: NSOrderedSet())
         VoiceChannelParticipantNotification(setChangeInfo: changeInfo, conversationId: conversationId).post()
     }
     
