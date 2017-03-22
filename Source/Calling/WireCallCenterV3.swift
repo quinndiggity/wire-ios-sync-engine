@@ -534,7 +534,7 @@ private typealias WireCallMessageToken = UnsafeMutableRawPointer
     }
     
     /// Call this method when the callParticipants changed and avs calls the handler `wcall_group_changed_h`
-    fileprivate func callParticipantsChanged(conversationId: UUID, participants: [CallMember]) {
+    func callParticipantsChanged(conversationId: UUID, participants: [CallMember]) {
         if let snapshot = participantSnapshots[conversationId] {
             snapshot.callParticipantsChanged(newParticipants: participants)
         } else if participants.count > 0 {
