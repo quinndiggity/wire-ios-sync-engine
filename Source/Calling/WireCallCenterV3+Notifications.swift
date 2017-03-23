@@ -33,6 +33,8 @@ extension SelfPostingNotification {
     }
 }
 
+
+
 /// MARK - Video call observer
 
 public typealias WireCallCenterObserverToken = NSObjectProtocol
@@ -48,6 +50,8 @@ struct WireCallCenterV3VideoNotification : SelfPostingNotification {
 
 }
 
+
+
 /// MARK - Call state observer
 
 public protocol WireCallCenterCallStateObserver : class {
@@ -61,6 +65,8 @@ public struct WireCallCenterCallStateNotification : SelfPostingNotification {
     let conversationId : UUID
     let userId : UUID?
 }
+
+
 
 /// MARK - Missed call observer
 
@@ -77,6 +83,8 @@ public struct WireCallCenterMissedCallNotification : SelfPostingNotification {
     let video: Bool
 }
 
+
+
 /// MARK - ConferenceParticipantsObserver
 protocol WireCallCenterConferenceParticipantsObserver : class {
     func callCenterConferenceParticipantsChanged(conversationId: UUID, userIds: [UUID])
@@ -89,6 +97,25 @@ struct WireCallCenterConferenceParticipantsChangedNotification : SelfPostingNoti
     let userId : UUID
     let timestamp: Date
     let video: Bool
+}
+
+
+
+/// MARK - CBR observer
+
+public protocol WireCallCenterCBRCallObserver : class {
+    func callCenterCallIsCBR()
+}
+
+struct WireCallCenterCBRCallNotification {
+    static let notificationName = Notification.Name("WireCallCenterCBRCallNotification")
+    static let userInfoKey = notificationName.rawValue
+    
+    func post() {
+        NotificationCenter.default.post(name: WireCallCenterCBRCallNotification.notificationName,
+                                        object: nil,
+                                        userInfo: [WireCallCenterCBRCallNotification.userInfoKey : self])
+    }
 }
 
 

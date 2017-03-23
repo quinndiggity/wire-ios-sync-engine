@@ -90,7 +90,7 @@ public class WireCallCenterV3Mock : WireCallCenterV3 {
     public var overridenCallingProtocol : CallingProtocol = .version2
     public var startCallShouldFail : Bool = false {
         didSet{
-            (avsWrapper as! MockAVSWrapper).startCallShouldFail = answerCallShouldFail
+            (avsWrapper as! MockAVSWrapper).startCallShouldFail = startCallShouldFail
         }
     }
     public var answerCallShouldFail : Bool = false {

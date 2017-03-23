@@ -59,26 +59,13 @@ public class AVSWrapper : AVSWrapperType {
             }
         })
         
-        wcall_set_group_changed_handler(
-            { (conversationIdRef, callMembersRef, contextRef) in
-                
-                guard let contextRef = contextRef, let convID = UUID(cString: conversationIdRef) else { return }
-                
-                var members = [CallMember]()
-                if let callMembers = callMembersRef?.pointee {
-                    for i in 0..<callMembers.membc {
-                        guard let cMember = callMembers.membv?[Int(i)],
-                            let member = CallMember(wcallMember: cMember)
-                            else { continue }
-                        members.append(member)
-                    }
-                }
-                
-                let callCenter = Unmanaged<WireCallCenterV3>.fromOpaque(contextRef).takeUnretainedValue()
-                callCenter.callParticipantsChanged(conversationId: convID, participants: members)
-            },
-            observer)
+        wcall_set_group_changed_handler(GroupMemberHandler, observer)
 
+        wcall_set_audio_cbr_enabled_handler({ _ in
+            DispatchQueue.main.async {
+                WireCallCenterCBRCallNotification().post()
+            }
+        })
     }
     
     public func getCallState(conversationId: UUID) -> CallState {

@@ -303,24 +303,6 @@ public func GroupMemberHandler(conversationIdRef: UnsafePointer<Int8>?, callMemb
 }
 
 
-
-/// MARK - CBR observer
-
-public protocol WireCallCenterCBRCallObserver : class {
-    func callCenterCallIsCBR()
-}
-
-struct WireCallCenterCBRCallNotification {
-    static let notificationName = Notification.Name("WireCallCenterCBRCallNotification")
-    static let userInfoKey = notificationName.rawValue
-    
-    func post() {
-        NotificationCenter.default.post(name: WireCallCenterCBRCallNotification.notificationName,
-                                        object: nil,
-                                        userInfo: [WireCallCenterCBRCallNotification.userInfoKey : self])
-    }
-}
-
 /// MARK - Call center transport
 
 @objc
@@ -391,13 +373,6 @@ private typealias WireCallMessageToken = UnsafeMutableRawPointer
         
         let observer = Unmanaged.passUnretained(self).toOpaque()
         self.avsWrapper = avsWrapper ?? AVSWrapper(userId: userId, clientId: clientId, observer: observer)
-
-        // TODO Sabine
-//        wcall_set_audio_cbr_enabled_handler({ _ in
-//            DispatchQueue.main.async {
-//                WireCallCenterCBRCallNotification().post()
-//            }
-//        })
     
         WireCallCenterV3.activeInstance = self
     }

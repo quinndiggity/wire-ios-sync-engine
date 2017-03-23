@@ -1,2 +1,2 @@
 github "wireapp/wire-ios-message-strategy" ~> 29.0.0
-github "wireapp/avs-ios-binaries-appstore" == 3.4.16
+github "wireapp/avs-ios-binaries-appstore" == 3.4.18
