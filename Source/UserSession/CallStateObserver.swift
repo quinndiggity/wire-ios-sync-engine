@@ -68,6 +68,24 @@ extension CallStateObserver : WireCallCenterCallStateObserver, WireCallCenterMis
                 self.localNotificationDispatcher.process(callState: callState, in: conversation, sender: user)
             }
             
+            // The conversationListIndicator might have changed due to the changed callState, we need to notify the UI about it
+            if let uiMOC = self.managedObjectContext.zm_userInterface {
+                uiMOC.performGroupedBlock {
+                    guard let uiConv = (try? uiMOC.existingObject(with: conversation.objectID)) as? ZMConversation else { return }
+                    if case .incoming(video: _, shouldRing: false) = callState {
+                        uiConv.isIgnoringCallV3 = true
+                    } else {
+                        uiConv.isIgnoringCallV3 = false
+                    }
+                    if uiMOC.zm_hasChanges && !uiMOC.hasChanges {
+                        uiMOC.saveOrRollback()
+                    }
+                    NotificationDispatcher.notifyNonCoreDataChanges(objectID: uiConv.objectID,
+                                                                    changedKeys: [ZMConversationListIndicatorKey],
+                                                                    uiContext: uiMOC)
+                }
+            }
+            
             self.callingSystemMessageGenerator.process(callState: callState, in: conversation, sender: user)
             self.managedObjectContext.enqueueDelayedSave()
         }

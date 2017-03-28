@@ -157,7 +157,9 @@ public enum CallState : Equatable {
     }
 }
 
-public struct CallMember {
+// TODO Sabine turn into struct when ChangedIndexes works in Swift
+public class CallMember : Hashable {
+
     let remoteId : UUID
     let audioEstablished : Bool
     
@@ -170,6 +172,14 @@ public struct CallMember {
     init(userId : UUID) {
         remoteId = userId
         audioEstablished = false
+    }
+    
+    public var hashValue: Int {
+        return remoteId.hashValue
+    }
+    
+    public static func ==(lhs: CallMember, rhs: CallMember) -> Bool {
+        return lhs.remoteId == rhs.remoteId
     }
 }
 
@@ -534,7 +544,7 @@ private typealias WireCallMessageToken = UnsafeMutableRawPointer
 
     /// Returns the callParticipants currently in the conversation
     func callParticipants(conversationId: UUID) -> [UUID] {
-        return participantSnapshots[conversationId]?.callParticipantState ?? []
+        return participantSnapshots[conversationId]?.members.map{ $0.remoteId } ?? []
     }
     
     func initiatorForCall(conversationId: UUID) -> UUID? {

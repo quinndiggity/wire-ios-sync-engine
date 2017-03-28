@@ -163,8 +163,9 @@ extension WireCallCenterV3 {
 class VoiceChannelParticipantV3Snapshot {
     
     fileprivate var state : SetSnapshot
-    public private(set) var activeFlowParticipantsState : [UUID]
-    public private(set) var callParticipantState : [UUID]
+//    public private(set) var activeFlowParticipantsState : NSMutableOrderedSet
+//    public private(set) var callParticipantState : NSMutableOrderedSet
+    public private(set) var members : [CallMember]
     
     fileprivate let conversationId : UUID
     fileprivate let selfUserID : UUID
@@ -180,14 +181,18 @@ class VoiceChannelParticipantV3Snapshot {
         }
         
         let allMembers = members ?? callCenter.activeFlowParticipants(in: conversationId)
-        (callParticipantState, activeFlowParticipantsState) = type(of:self).sort(participants: allMembers, selfUserID: selfUserID)
-        state = SetSnapshot(set: NSOrderedSet(array: callParticipantState), moveType: .uiCollectionView)
+//        let (all, connected) = type(of:self).sort(participants: allMembers, selfUserID: selfUserID)
+//        activeFlowParticipantsState = NSMutableOrderedSet(array: connected)
+//        callParticipantState = NSMutableOrderedSet(array: all)
+        self.members = allMembers
+        state = SetSnapshot(set: NSOrderedSet(array: self.members), moveType: .uiCollectionView)
+        print(state.set)
         notifyInitialChange()
     }
     
     func notifyInitialChange(){
         let changedIndexes = ZMChangedIndexes(start: ZMOrderedSetState(orderedSet: NSOrderedSet()),
-                                              end: ZMOrderedSetState(orderedSet: NSOrderedSet(array: callParticipantState)),
+                                              end: ZMOrderedSetState(orderedSet: NSOrderedSet(array: members)),
                                               updatedState: ZMOrderedSetState(orderedSet: NSOrderedSet()))!
         let changeInfo = SetChangeInfo(observedObject: conversationId as NSUUID,
                                        changeSet: changedIndexes,
@@ -212,29 +217,34 @@ class VoiceChannelParticipantV3Snapshot {
     }
     
     func callParticipantsChanged(newParticipants: [CallMember]) {
-        let (newCallParticipants, newFlowParticipants) = type(of:self).sort(participants: newParticipants, selfUserID: selfUserID)
-        if activeFlowParticipantsState == newFlowParticipants && callParticipantState == newCallParticipants { return }
-        
-        /// participants who have an updated flow, but are still in the voiceChannel
-        let newConnected =  newFlowParticipants.filter{!activeFlowParticipantsState.contains($0)}
-        let newDisconnected = activeFlowParticipantsState.filter{!newFlowParticipants.contains($0)}
-        
-        /// participants who joined or left the voiceChannel
-        let added = newCallParticipants.filter{!callParticipantState.contains($0)}
-        let removed = callParticipantState.filter{!newCallParticipants.contains($0)}
+        // TODO Sabine : Rewrite ChangedIndexes in Swift?
+        let added = newParticipants.filter{!members.contains($0)}
+        let removed = members.filter{!newParticipants.contains($0)}
 
-        activeFlowParticipantsState = newFlowParticipants
-        callParticipantState = newCallParticipants
-
-        let updated = Set(newConnected + newDisconnected).subtracting(added).subtracting(removed)
+        removed.forEach{
+            guard let idx = members.index(of: $0) else { return }
+            members.remove(at: idx)
+        }
+        added.forEach{
+            guard let idx = newParticipants.index(of: $0) else { return }
+            members.insert($0, at: idx)
+        }
+        var updated : Set<CallMember> = Set()
+        for m in members {
+            guard let idx = newParticipants.index(of: m) else { continue }
+            let newMember = newParticipants[idx]
+            if newMember.audioEstablished != m.audioEstablished {
+                updated.insert(m)
+            }
+        }
         recalculateSet(updated: updated)
     }
     
     /// calculate inserts / deletes / moves
-    func recalculateSet(updated: Set<UUID>) {
+    func recalculateSet(updated: Set<CallMember>) {
         guard let newStateUpdate = state.updatedState(NSOrderedSet(set: updated),
                                                       observedObject: conversationId as NSUUID,
-                                                      newSet: NSOrderedSet(array: callParticipantState))
+                                                      newSet: NSOrderedSet(array: members))
         else { return}
         
         state = newStateUpdate.newSnapshot
@@ -247,8 +257,8 @@ class VoiceChannelParticipantV3Snapshot {
     }
     
     public func connectionState(forUserWith userId: UUID) -> VoiceChannelV2ConnectionState {
-        let isJoined = callParticipantState.contains(userId)
-        let isFlowActive = activeFlowParticipantsState.contains(userId)
+        let isJoined = members.map{$0.remoteId}.contains(userId)
+        let isFlowActive = members.map{$0.remoteId}.contains(userId)
         
         switch (isJoined, isFlowActive) {
         case (false, _):    return .notConnected

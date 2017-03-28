@@ -18,6 +18,8 @@
 
 
 import Foundation
+import ZMCDataModel
+@testable import zmessaging
 
 struct V2CallStateChange {
     let conversation : ZMConversation
@@ -83,28 +85,42 @@ class CallingV3Tests : IntegrationTestBase {
         super.tearDown()
     }
     
-    func selfJoinCall() {
+    func selfJoinCall(isStart: Bool) {
         userSession.enqueueChanges {
             _ = self.conversationUnderTest.voiceChannelRouter?.v3.join(video: false)
+            if isStart {
+                (WireCallCenterV3.activeInstance as! WireCallCenterV3Mock).mockAVSCallState = .outgoing
+            } else {
+                (WireCallCenterV3.activeInstance as! WireCallCenterV3Mock).mockAVSCallState = .answered
+            }
         }
         XCTAssert(waitForAllGroupsToBeEmpty(withTimeout: 0.5))
     }
     
     func selfDropCall(){
+        (WireCallCenterV3.activeInstance as! WireCallCenterV3Mock).mockAVSCallState = .terminating(reason: .canceled)
+
         userSession.enqueueChanges {
             self.conversationUnderTest.voiceChannelRouter?.v3.leave()
         }
         XCTAssert(waitForAllGroupsToBeEmpty(withTimeout: 0.5))
     }
     
-    func otherJoinCall(){
-        if useGroupConversation {
-            let user = conversationUnderTest.otherActiveParticipants.firstObject as! ZMUser
-            simulateParticipantsChanged(user: user, establishedFlow: false)
-        } else {
-            simulateEstablishedFlow(user: conversationUnderTest.connectedUser!)
-        }
+    func otherStartCall(user: ZMUser, isVideoCall: Bool = false, shouldRing: Bool = true) {
+        (WireCallCenterV3.activeInstance as! WireCallCenterV3Mock).mockAVSCallState = .incoming(video: isVideoCall, shouldRing: shouldRing)
+
+        let userIdRef = user.remoteIdentifier!.transportString().cString(using: .utf8)
+        IncomingCallHandler(conversationId: conversationIdRef, userId: userIdRef, isVideoCall: isVideoCall ? 1 : 0, shouldRing: shouldRing ? 1 : 0, contextRef: wireCallCenterRef)
         XCTAssert(waitForAllGroupsToBeEmpty(withTimeout: 0.5))
+    }
+    
+    func otherJoinCall(user: ZMUser) {
+        (WireCallCenterV3.activeInstance as! WireCallCenterV3Mock).mockAVSCallState = .answered
+        if useGroupConversation {
+            participantsChanged(user: user, establishedFlow: false)
+        } else {
+            AnsweredCallHandler(conversationId: conversationIdRef, contextRef: wireCallCenterRef)
+        }
     }
     
     private var wireCallCenterRef : UnsafeMutableRawPointer? {
@@ -115,12 +131,14 @@ class CallingV3Tests : IntegrationTestBase {
         return conversationUnderTest.remoteIdentifier!.transportString().cString(using: .utf8)
     }
     
-    func simulateEstablishedFlow(user: ZMUser){
+    func establishedFlow(user: ZMUser){
+        (WireCallCenterV3.activeInstance as! WireCallCenterV3Mock).mockAVSCallState = .established
+
         let userIdRef = user.remoteIdentifier!.transportString().cString(using: .utf8)
         EstablishedCallHandler(conversationId: conversationIdRef, userId: userIdRef, contextRef: wireCallCenterRef)
     }
     
-    func simulateParticipantsChanged(user: ZMUser, establishedFlow: Bool) {
+    func participantsChanged(user: ZMUser, establishedFlow: Bool) {
         let userIdRef = user.remoteIdentifier!.transportString().cString(using: .utf8)
         let userPointer = UnsafeMutablePointer<Int8>(mutating: userIdRef)
         
@@ -133,9 +151,19 @@ class CallingV3Tests : IntegrationTestBase {
         userPointer?.deinitialize()
     }
 
-    func simulateCallClosed(user: ZMUser, reason: CallClosedReason) {
+    func closeCall(user: ZMUser, reason: CallClosedReason) {
+        (WireCallCenterV3.activeInstance as! WireCallCenterV3Mock).mockAVSCallState = .none
+
         let userIdRef = user.remoteIdentifier!.transportString().cString(using: .utf8)
         ClosedCallHandler(reason: reason.rawValue, conversationId: conversationIdRef, userId: userIdRef, metrics: nil, contextRef: wireCallCenterRef)
+        XCTAssert(waitForAllGroupsToBeEmpty(withTimeout: 0.5))
+    }
+    
+    func simulateMissedCall(user: ZMUser) {
+        otherStartCall(user: user)
+
+        let userIdRef = user.remoteIdentifier!.transportString().cString(using: .utf8)
+        MissedCallHandler(conversationId: conversationIdRef, messageTime: UInt32(Date().timeIntervalSince1970), userId: userIdRef, isVideoCall: 0, contextRef: wireCallCenterRef)
         XCTAssert(waitForAllGroupsToBeEmpty(withTimeout: 0.5))
     }
     
@@ -158,7 +186,7 @@ class CallingV3Tests : IntegrationTestBase {
         stateObserver.observe(conversation: conversationUnderTest, context: uiMOC)
 
         // when
-        selfJoinCall()
+        selfJoinCall(isStart: true)
         
         // then
         XCTAssertEqual(stateObserver.changes.count, 1)
@@ -166,7 +194,7 @@ class CallingV3Tests : IntegrationTestBase {
         
         // when
         selfDropCall()
-        simulateCallClosed(user: self.localSelfUser, reason: .canceled)
+        closeCall(user: self.localSelfUser, reason: .canceled)
 
         // then
         XCTAssertEqual(stateObserver.changes.count, 2)
@@ -180,7 +208,7 @@ class CallingV3Tests : IntegrationTestBase {
         stateObserver.observe(conversation: conversationUnderTest, context: uiMOC)
         
         // when
-        selfJoinCall()
+        selfJoinCall(isStart: true)
         
         // then
         XCTAssertEqual(stateObserver.changes.count, 1)
@@ -194,84 +222,55 @@ class CallingV3Tests : IntegrationTestBase {
         stateObserver.checkLastNotificationHasCallState(.incomingCallInactive)
 
         // and when
-        simulateCallClosed(user: self.localSelfUser, reason: .canceled)
+        closeCall(user: self.localSelfUser, reason: .canceled)
 
         XCTAssertEqual(stateObserver.changes.count, 3)
         stateObserver.checkLastNotificationHasCallState(.noActiveUsers)
     }
     
     func testThatItSendsOutAllExpectedNotificationsWhenSelfUserCalls_OneOnOne() {
-        
-        // no active users -> self is calling -> self connected to active channel -> no active users
     
         // given
         XCTAssertTrue(logInAndWaitForSyncToBeComplete())
-        
         stateObserver.observe(conversation: conversationUnderTest, context: uiMOC)
-        participantObserver.observe(conversation: conversationUnderTest, context: uiMOC)
 
         // (1) self calling & backend acknowledges
         //
         // when
-        selfJoinCall()
+        selfJoinCall(isStart: true)
         
         // then
         XCTAssertEqual(stateObserver.changes.count, 1)
         stateObserver.checkLastNotificationHasCallState(.outgoingCall)
-        XCTAssertEqual(participantObserver.changes.count, 0)
         
         // (2) other party joins
         //
         // when
-        otherJoinCall()
+        let user = conversationUnderTest.connectedUser!
+        otherJoinCall(user: user)
         
         // then
-        stateObserver.checkLastNotificationHasCallState(.selfConnectedToActiveChannel)
+        XCTAssertEqual(stateObserver.changes.count, 2)
+        stateObserver.checkLastNotificationHasCallState(.selfIsJoiningActiveChannel)
 
-        // TODO Sabine: Do we get these updates for 1on1 as well?
-//        XCTAssertEqual(participantObserver.changes.count, 1)
-//        if let partInfo =  participantObserver.changes.last {
-//            XCTAssertEqual(partInfo.insertedIndexes, IndexSet(integer: 0))
-//            XCTAssertEqual(partInfo.updatedIndexes, IndexSet())
-//            XCTAssertEqual(partInfo.deletedIndexes, IndexSet())
-//            XCTAssertEqual(partInfo.movedIndexPairs, [])
-//        }
+        // (3) flow aquired
+        //
+        // when
+        establishedFlow(user: user)
         
-//        // (3) flow aquired
-//        //
-//        // when
-//        [self simulateMediaFlowEstablishedOnConversation:oneToOneConversation];
-//        [self simulateParticipantsChanged:@[self.user2] onConversation:oneToOneConversation];
-//        WaitForAllGroupsToBeEmpty(0.5);
-//        
-//        // then
-//        XCTAssertEqual(stateObserver.changes.count, 3u);
-//        XCTAssertEqual(stateObserver.changes.lastObject.state, VoiceChannelV2StateSelfConnectedToActiveChannel);
-//        
-//        XCTAssertEqual(participantObserver.changes.count, 2u);
-//        SetChangeInfo *partInfo3 = participantObserver.changes.lastObject;
-//        XCTAssertEqual(partInfo3.insertedIndexes, [NSIndexSet indexSet]);
-//        XCTAssertEqual(partInfo3.updatedIndexes, [NSIndexSet indexSetWithIndex:0]);
-//        XCTAssertEqual(partInfo3.deletedIndexes, [NSIndexSet indexSet]);
-//        XCTAssertEqual(partInfo3.movedIndexPairs, @[]);
-//        
+        // then
+        XCTAssertEqual(stateObserver.changes.count, 3)
+        stateObserver.checkLastNotificationHasCallState(.selfConnectedToActiveChannel)
+        
         // (4) self user leaves
         //
         // when
         selfDropCall()
-        simulateCallClosed(user: self.localSelfUser, reason: .canceled)
+        closeCall(user: self.localSelfUser, reason: .canceled)
         
         // then
-        XCTAssertEqual(stateObserver.changes.count, 3)
+        XCTAssertEqual(stateObserver.changes.count, 4)
         stateObserver.checkLastNotificationHasCallState(.noActiveUsers)
-        
-//        XCTAssertEqual(participantObserver.changes.count, 3)
-//        if let partInfo = participantObserver.changes.last {
-//            XCTAssertEqual(partInfo.insertedIndexes, IndexSet())
-//            XCTAssertEqual(partInfo.updatedIndexes, IndexSet())
-////            XCTAssertEqual(partInfo.deletedIndexes, IndexSet(integersIn: Range(0, 0)))
-//            XCTAssertEqual(partInfo.movedIndexPairs, [])
-//        }
     }
     
     func testThatItSendsOutAllExpectedNotificationsWhenSelfUserCalls_Group() {
@@ -288,7 +287,7 @@ class CallingV3Tests : IntegrationTestBase {
         // (1) self calling & backend acknowledges
         //
         // when
-        selfJoinCall()
+        selfJoinCall(isStart: true)
         
         // then
         XCTAssertEqual(stateObserver.changes.count, 1)
@@ -299,7 +298,7 @@ class CallingV3Tests : IntegrationTestBase {
         //
         // when
         let otherUser = conversationUnderTest.otherActiveParticipants.firstObject as! ZMUser
-        simulateParticipantsChanged(user: otherUser, establishedFlow: false)
+        participantsChanged(user: otherUser, establishedFlow: false)
         
         // then
         XCTAssertEqual(participantObserver.changes.count, 1)
@@ -313,7 +312,7 @@ class CallingV3Tests : IntegrationTestBase {
         // (3) flow aquired
         //
         // when
-        simulateParticipantsChanged(user: otherUser, establishedFlow: true)
+        participantsChanged(user: otherUser, establishedFlow: true)
         
         // then
         XCTAssertEqual(participantObserver.changes.count, 2)
@@ -328,106 +327,300 @@ class CallingV3Tests : IntegrationTestBase {
         //
         // when
         selfDropCall()
-        simulateCallClosed(user: self.localSelfUser, reason: .canceled)
+        closeCall(user: self.localSelfUser, reason: .canceled)
         
         // then
         stateObserver.checkLastNotificationHasCallState(.noActiveUsers)
     }
+    
+    func testSetSnapshot(){
+        
+        let userId = NSUUID()
+        let userIds1 = [userId]
+        let userIds2 = [userId]
+        let snapshot = SetSnapshot(set: NSOrderedSet(array: userIds1), moveType: .uiCollectionView)
+        
+        // when
+        if let change = snapshot.updatedState(NSOrderedSet(array: [userId]),
+                                              observedObject: user1,
+                                              newSet: NSOrderedSet(array: userIds2))?.changeInfo
+        {
+
+            XCTAssertEqual(change.insertedIndexes, IndexSet())
+            XCTAssertEqual(change.updatedIndexes, IndexSet(integer: 0))
+            XCTAssertEqual(change.deletedIndexes, IndexSet())
+            XCTAssertEqual(change.movedIndexPairs, [])
+        }
+    }
+    
+    
+    func testThatItSendsOutAllExpectedNotificationsWhenOtherUserCalls_OneOnOne() {
+        // given
+        XCTAssertTrue(logInAndWaitForSyncToBeComplete())
+        stateObserver.observe(conversation: conversationUnderTest, context: uiMOC)
+        participantObserver.observe(conversation: conversationUnderTest, context: uiMOC)
+
+        let user = conversationUnderTest.connectedUser!
+
+        // (1) other user joins
+        // when
+        otherStartCall(user: user)
+        
+        // then
+        XCTAssertEqual(stateObserver.changes.count, 1)
+        stateObserver.checkLastNotificationHasCallState(.incomingCall)
+        
+        // (2) we join
+        // when
+        selfJoinCall(isStart: false)
+        
+        // then
+        XCTAssertEqual(stateObserver.changes.count, 2)
+        stateObserver.checkLastNotificationHasCallState(.selfIsJoiningActiveChannel)
+
+        participantObserver.changes.removeAll()
+        
+        // (3) flow aquired
+        // when
+        participantsChanged(user: user, establishedFlow: true) // TODO Sabine: what's the flow here?
+        establishedFlow(user: localSelfUser)
+        
+        // then
+        XCTAssertEqual(stateObserver.changes.count, 3)
+        stateObserver.checkLastNotificationHasCallState(.selfConnectedToActiveChannel)
+        XCTAssertEqual(participantObserver.changes.count, 1) // we notify that user connected
+        
+        // (4) the other user leaves
+        // when
+        closeCall(user: user, reason: .canceled)
+        
+        // then
+        XCTAssertEqual(stateObserver.changes.count, 4)
+        stateObserver.checkLastNotificationHasCallState(.noActiveUsers)
+    }
+
+    func testThatItSendsOutAllExpectedNotificationsWhenOtherUserCalls_Group() {
+        // given
+        XCTAssertTrue(logInAndWaitForSyncToBeComplete())
+        useGroupConversation = true
+        stateObserver.observe(conversation: conversationUnderTest, context: uiMOC)
+        participantObserver.observe(conversation: conversationUnderTest, context: uiMOC)
+        
+        let user = conversationUnderTest.otherActiveParticipants.firstObject as! ZMUser
+        
+        // (1) other user joins
+        // when
+        otherStartCall(user: user)
+        
+        // then
+        XCTAssertEqual(stateObserver.changes.count, 1)
+        stateObserver.checkLastNotificationHasCallState(.incomingCall)
+        
+        // (2) we join
+        // when
+        selfJoinCall(isStart: false)
+        
+        // then
+        XCTAssertEqual(stateObserver.changes.count, 2)
+        stateObserver.checkLastNotificationHasCallState(.selfIsJoiningActiveChannel)
+        
+        participantObserver.changes.removeAll()
+        
+        // (3) flow aquired
+        // when
+        participantsChanged(user: user, establishedFlow: true)
+        establishedFlow(user: localSelfUser)
+
+        // then
+        XCTAssertEqual(stateObserver.changes.count, 3)
+        stateObserver.checkLastNotificationHasCallState(.selfConnectedToActiveChannel)
+        XCTAssertEqual(participantObserver.changes.count, 1) // we notify that user connected
+        
+        // (4) the other user leaves
+        // when
+        closeCall(user: user, reason: .canceled)
+        
+        // then
+        XCTAssertEqual(stateObserver.changes.count, 4)
+        stateObserver.checkLastNotificationHasCallState(.noActiveUsers)
+    }
+    
+    func testThatItSendsANotificationWhenWeIgnoreACall() {
+        // given
+        XCTAssertTrue(logInAndWaitForSyncToBeComplete())
+        stateObserver.observe(conversation: conversationUnderTest, context: uiMOC)
+        let user = conversationUnderTest.connectedUser!
+
+        // (1) other user joins
+        // when
+        otherStartCall(user: user)
+        
+        // then
+        XCTAssertEqual(stateObserver.changes.count, 1)
+        stateObserver.checkLastNotificationHasCallState(.incomingCall)
+        
+        // (2) we ignore
+        // when
+        userSession.performChanges{
+            self.conversationUnderTest.voiceChannelRouter?.v3.ignore()
+        }
+        XCTAssert(waitForCustomExpectations(withTimeout: 0.5))
+        
+        // then
+        XCTAssertEqual(stateObserver.changes.count, 2)
+        stateObserver.checkLastNotificationHasCallState(.noActiveUsers)
+    }
+    
+    func testThatItSendsANotificationIfIgnoringACallAndImmediatelyAcceptingIt() {
+        
+        // given
+        XCTAssertTrue(logInAndWaitForSyncToBeComplete())
+        stateObserver.observe(conversation: conversationUnderTest, context: uiMOC)
+        let user = conversationUnderTest.connectedUser!
+
+        // (1) other user joins and we ignore
+        // when
+        otherStartCall(user: user)
+
+        userSession.performChanges{
+            self.conversationUnderTest.voiceChannelRouter?.v3.ignore()
+        }
+        XCTAssert(waitForCustomExpectations(withTimeout: 0.5))
+        
+        // then
+        XCTAssertEqual(stateObserver.changes.count, 2)
+        stateObserver.checkLastNotificationHasCallState(.noActiveUsers)
+
+        // (2) we join
+        // when
+        selfJoinCall(isStart: false)
+        
+        // then
+        XCTAssertEqual(stateObserver.changes.count, 3)
+        stateObserver.checkLastNotificationHasCallState(.selfIsJoiningActiveChannel)
+    }
+    
+    
+    func testThatItFiresAConversationChangeNotificationWhenAGroupCallIsDeclined() {
+        // given
+        XCTAssertTrue(logInAndWaitForSyncToBeComplete())
+        useGroupConversation = true
+        
+        let user = conversationUnderTest.otherActiveParticipants.firstObject as! ZMUser
+        let convObserver = ConversationChangeObserver(conversation: conversationUnderTest)
+
+        // (1) Other user calls
+        // when
+        otherStartCall(user: user)
+        XCTAssert(waitForAllGroupsToBeEmpty(withTimeout:0.5))
+
+        // then
+        XCTAssertEqual(conversationUnderTest.conversationListIndicator, ZMConversationListIndicator.none)
+        
+        // (2) Self ignores call
+        // and when
+        userSession.performChanges{
+            self.conversationUnderTest.voiceChannelRouter?.v3.ignore()
+        }
+        XCTAssert(waitForAllGroupsToBeEmpty(withTimeout:0.5))
+        
+        // then
+        XCTAssertEqual(convObserver!.notifications.count, 2)
+        if let change = convObserver!.notifications.lastObject as? ConversationChangeInfo {
+            XCTAssertTrue(change.conversationListIndicatorChanged)
+        }
+        XCTAssertEqual(conversationUnderTest.conversationListIndicator, ZMConversationListIndicator.inactiveCall)
+        
+        // (2) Other user ends call
+        // and when
+        closeCall(user: user, reason: .canceled)
+        XCTAssert(waitForAllGroupsToBeEmpty(withTimeout:0.5))
+        spinMainQueue(withTimeout: 0.5)
+        
+        // then
+        XCTAssertEqual(convObserver!.notifications.count, 3)
+        if let change = convObserver!.notifications.lastObject as? ConversationChangeInfo {
+            XCTAssertTrue(change.conversationListIndicatorChanged)
+        }
+        XCTAssertEqual(conversationUnderTest.conversationListIndicator, ZMConversationListIndicator.none)
+    }
+
+    
 }
 
 
+// MARK - SystemMessages
+extension CallingV3Tests {
+    
+    func fetchAllClients(){
+        userSession.performChanges {
+            self.conversationUnderTest.appendMessage(withText: "foo") // make sure we have all clients
+        }
+        XCTAssert(waitForAllGroupsToBeEmpty(withTimeout: 0.5))
+        spinMainQueue(withTimeout: 1.5)
+    }
 
-/*
+    func testThatItCreatesASystemMessageWhenWeMissedACall(){
+        
+        // given
+        XCTAssertTrue(logInAndWaitForSyncToBeComplete())
+        let user = conversationUnderTest.connectedUser!
+        fetchAllClients()
 
- 
+        let messageCount = conversationUnderTest.messages.count;
+        
+        // expect
+        expectation(forNotification: zmessaging.WireCallCenterMissedCallNotification.notificationName.rawValue, object: nil)
 
- 
- - (void)testThatItSendsOutAllExpectedNotificationsWhenOtherUserCalls
- {
- ///3333333
- // given
- XCTAssertTrue([self logInAndWaitForSyncToBeComplete]);
- ZMConversation * NS_VALID_UNTIL_END_OF_SCOPE oneToOneConversation = self.conversationUnderTest;
- 
- V2CallStateTestObserver *stateObserver = [[V2CallStateTestObserver alloc] init];
- V2VoiceChannelParticipantTestObserver *participantObserver = [[V2VoiceChannelParticipantTestObserver alloc] init];
- 
- id stateToken = [WireCallCenterV2 addVoiceChannelStateObserverWithObserver:stateObserver context:self.uiMOC];
- id participantToken = [WireCallCenterV2 addVoiceChannelParticipantObserverWithObserver:participantObserver forConversation:oneToOneConversation context:self.uiMOC];
- 
- // (1) other user joins
- // when
- [self otherJoinCall];
- WaitForAllGroupsToBeEmpty(0.5);
- 
- // then
- XCTAssertEqual(stateObserver.changes.count, 1u);
- XCTAssertEqual(stateObserver.changes.lastObject.state, VoiceChannelV2StateIncomingCall);
- 
- // (2) we join
- // when
- [self selfJoinCall];
- WaitForAllGroupsToBeEmpty(0.5);
- 
- // then
- {
- XCTAssertEqual(stateObserver.changes.count, 2u);
- XCTAssertEqual(stateObserver.changes.lastObject.state, VoiceChannelV2StateSelfIsJoiningActiveChannel);
- [participantObserver.changes removeAllObjects];
- }
- 
- // (3) flow aquired
- //
- // when
- [self simulateMediaFlowEstablishedOnConversation:self.conversationUnderTest];
- [self simulateParticipantsChanged:@[self.user2] onConversation:self.conversationUnderTest];
- WaitForAllGroupsToBeEmpty(0.5);
- 
- // then
- {
- XCTAssertEqual(stateObserver.changes.count, 3u);
- XCTAssertEqual(stateObserver.changes.lastObject.state, VoiceChannelV2StateSelfConnectedToActiveChannel);
- XCTAssertEqual(participantObserver.changes.count, 1u); // we notify that user connected
- }
- 
- // (4) the other user leaves. The backend tells us we are both idle
- 
- [self otherDropsCall];
- WaitForAllGroupsToBeEmpty(0.5);
- 
- // then
- {
- XCTAssertEqual(stateObserver.changes.count, 5u); // goes through transfer state before disconnect
- XCTAssertEqual(stateObserver.changes.lastObject.state, VoiceChannelV2StateNoActiveUsers);
- }
- 
- [WireCallCenterV2 removeObserverWithToken:stateToken];
- [WireCallCenterV2 removeObserverWithToken:participantToken];
- }
- 
- - (void)testThatItCreatesASystemMessageWhenWeMissedACall
- {
- // given
- XCTAssertTrue([self logInAndWaitForSyncToBeComplete]);
- ZMConversation * oneToOneConversation = self.conversationUnderTest;
- [self otherJoinCall];
- WaitForAllGroupsToBeEmpty(0.5);
- NSUInteger messageCount = oneToOneConversation.messages.count;
- 
- // when
- {
- [self otherLeavesUnansweredCall];
- WaitForAllGroupsToBeEmpty(0.5);
- }
- 
- // then
- // we receive a systemMessage that we missed a call
- {
- XCTAssertEqual(oneToOneConversation.messages.count, messageCount+1u);
- id<ZMConversationMessage> systemMessage = oneToOneConversation.messages.lastObject;
- XCTAssertNotNil(systemMessage.systemMessageData);
- XCTAssertEqual(systemMessage.systemMessageData.systemMessageType, ZMSystemMessageTypeMissedCall);
- }
- }
+        // when
+        simulateMissedCall(user: user)
+        XCTAssert(waitForCustomExpectations(withTimeout: 0.5))
+        
+        // then
+        // we receive a systemMessage that we missed a call
+        XCTAssertEqual(conversationUnderTest.messages.count, messageCount+1)
+        guard let systemMessage = conversationUnderTest.messages.lastObject as? ZMSystemMessage
+        else {
+            return XCTFail("Did not insert a system message")
+        }
+        
+        XCTAssertNotNil(systemMessage.systemMessageData);
+        XCTAssertEqual(systemMessage.systemMessageData?.systemMessageType, ZMSystemMessageType.missedCall);
+    }
+    
+    func testThatTheMissedCallSystemMessageUnarchivesTheConversation(){
+        // given
+        XCTAssertTrue(logInAndWaitForSyncToBeComplete())
+        fetchAllClients()
 
- */
+        conversationUnderTest.isArchived = true
+        let user = conversationUnderTest.connectedUser!
+        
+        // expect
+        expectation(forNotification: zmessaging.WireCallCenterMissedCallNotification.notificationName.rawValue, object: nil)
+
+        // when
+        simulateMissedCall(user: user)
+        XCTAssert(waitForCustomExpectations(withTimeout: 0.5))
+
+        // then
+        XCTAssertFalse(conversationUnderTest.isArchived)
+    }
+    
+    func testThatItDoesNotCreateASystemMessageWhenTheCallIsEndedWithoutBeingMissed() {
+        
+        // given
+        XCTAssertTrue(logInAndWaitForSyncToBeComplete())
+        fetchAllClients()
+        let user = conversationUnderTest.connectedUser!
+        let messageCount = conversationUnderTest.messages.count;
+    
+        // when
+        otherStartCall(user: user)
+        closeCall(user: user, reason: .canceled)
+        
+        // we DO NOT receive a systemMessage
+        XCTAssertEqual(conversationUnderTest.messages.count, messageCount)
+    }
+}
+
