@@ -592,18 +592,12 @@
     return selfClient;
 }
 
-- (ZMClientMessage *)createClientTextMessage:(BOOL)encrypted
-{
-    return [self createClientTextMessage:self.name encrypted:encrypted];
-}
-
-- (ZMClientMessage *)createClientTextMessage:(NSString *)text encrypted:(BOOL)encrypted
+- (ZMClientMessage *)createClientTextMessage:(NSString *)text
 {
     ZMClientMessage *message = [ZMClientMessage insertNewObjectInManagedObjectContext:self.syncMOC];
     NSUUID *messageNonce = [NSUUID createUUID];
     ZMGenericMessage *textMessage = [ZMGenericMessage messageWithText:text nonce:messageNonce.transportString expiresAfter:nil];
     [message addData:textMessage.data];
-    message.isEncrypted = encrypted;
     return message;
 }
 
@@ -611,7 +605,6 @@
 {
     NSUUID *nonce = [NSUUID createUUID];
     ZMAssetClientMessage *imageMessage = [ZMAssetClientMessage assetClientMessageWithOriginalImageData:imageData nonce:nonce managedObjectContext:moc expiresAfter:0];
-    imageMessage.isEncrypted = encrypted;
     
     if(processed) {
         

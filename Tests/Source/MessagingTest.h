@@ -123,8 +123,7 @@ typedef BOOL (^SaveExpectationHandler)(ZMManagedObject *);
 - (UserClient *)createSelfClient;
 
 
-- (ZMClientMessage *)createClientTextMessage:(BOOL)encrypted;
-- (ZMClientMessage *)createClientTextMessage:(NSString *)text encrypted:(BOOL)encrypted;
+- (ZMClientMessage *)createClientTextMessage:(NSString *)text;
 - (ZMAssetClientMessage *)createImageMessageWithImageData:(NSData *)imageData
                                                    format:(ZMImageFormat)format
                                                 processed:(BOOL)processed
