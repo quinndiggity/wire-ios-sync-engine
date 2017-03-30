@@ -162,9 +162,7 @@ extension WireCallCenterV3 {
 
 class VoiceChannelParticipantV3Snapshot {
     
-    fileprivate var state : SetSnapshot
-//    public private(set) var activeFlowParticipantsState : NSMutableOrderedSet
-//    public private(set) var callParticipantState : NSMutableOrderedSet
+    fileprivate var state : SetSnapshotV2<CallMember>
     public private(set) var members : [CallMember]
     
     fileprivate let conversationId : UUID
@@ -181,26 +179,23 @@ class VoiceChannelParticipantV3Snapshot {
         }
         
         let allMembers = members ?? callCenter.activeFlowParticipants(in: conversationId)
-//        let (all, connected) = type(of:self).sort(participants: allMembers, selfUserID: selfUserID)
-//        activeFlowParticipantsState = NSMutableOrderedSet(array: connected)
-//        callParticipantState = NSMutableOrderedSet(array: all)
+
         self.members = allMembers
-        state = SetSnapshot(set: NSOrderedSet(array: self.members), moveType: .uiCollectionView)
-        print(state.set)
+        state = SetSnapshotV2(set: OrderedSetState(array: self.members), moveType: .uiCollectionView)
         notifyInitialChange()
     }
     
     func notifyInitialChange(){
-        let changedIndexes = ZMChangedIndexes(start: ZMOrderedSetState(orderedSet: NSOrderedSet()),
-                                              end: ZMOrderedSetState(orderedSet: NSOrderedSet(array: members)),
-                                              updatedState: ZMOrderedSetState(orderedSet: NSOrderedSet()))!
-        let changeInfo = SetChangeInfo(observedObject: conversationId as NSUUID,
-                                       changeSet: changedIndexes,
-                                       orderedSetState: NSOrderedSet())
+        let changedIndexes = ChangedIndexes(start: OrderedSetState(array: []),
+                                            end: OrderedSetState(array: members),
+                                            updated: Set())
+        let changeInfo = SetChangeInfoV2(observedObject: conversationId as NSUUID,
+                                         changeSet: changedIndexes,
+                                         orderedSetState: OrderedSetState<CallMember>(array: []))
         
         DispatchQueue.main.async { [weak self] in
             guard let `self` = self else { return }
-            VoiceChannelParticipantNotification(setChangeInfo: changeInfo, conversationId: self.conversationId).post()
+            VoiceChannelParticipantNotification(setChangeInfoV2: changeInfo, conversationId: self.conversationId).post()
         }
     }
     
@@ -242,16 +237,16 @@ class VoiceChannelParticipantV3Snapshot {
     
     /// calculate inserts / deletes / moves
     func recalculateSet(updated: Set<CallMember>) {
-        guard let newStateUpdate = state.updatedState(NSOrderedSet(set: updated),
+        guard let newStateUpdate = state.updatedState(updated: updated,
                                                       observedObject: conversationId as NSUUID,
-                                                      newSet: NSOrderedSet(array: members))
+                                                      newSet: OrderedSetState(array: members))
         else { return}
         
         state = newStateUpdate.newSnapshot
         
         DispatchQueue.main.async { [weak self] in
             guard let `self` = self else { return }
-            VoiceChannelParticipantNotification(setChangeInfo: newStateUpdate.changeInfo, conversationId: self.conversationId).post()
+            VoiceChannelParticipantNotification(setChangeInfo: nil, setChangeInfoV2: newStateUpdate.changeInfo, conversationId: self.conversationId).post()
         }
         
     }

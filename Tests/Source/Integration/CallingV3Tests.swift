@@ -57,14 +57,14 @@ class VoiceChannelStateTestObserver : VoiceChannelStateObserver {
 
 class VoiceChannelParticipantTestObserver : VoiceChannelParticipantObserver {
     
-    var changes : [SetChangeInfo] = []
+    var changes : [VoiceChannelParticipantNotification] = []
     var token : WireCallCenterObserverToken?
     
     func observe(conversation: ZMConversation, context: NSManagedObjectContext) {
         token = WireCallCenter.addVoiceChannelParticipantObserver(observer: self, forConversation: conversation, context: context)
     }
     
-    func voiceChannelParticipantsDidChange(_ changeInfo: SetChangeInfo) {
+    func voiceChannelParticipantsDidChange(_ changeInfo: VoiceChannelParticipantNotification) {
         changes.append(changeInfo)
     }
 }
@@ -120,6 +120,7 @@ class CallingV3Tests : IntegrationTestBase {
             participantsChanged(user: user, establishedFlow: false)
         } else {
             AnsweredCallHandler(conversationId: conversationIdRef, contextRef: wireCallCenterRef)
+            XCTAssert(waitForAllGroupsToBeEmpty(withTimeout: 0.5))
         }
     }
     
@@ -136,6 +137,7 @@ class CallingV3Tests : IntegrationTestBase {
 
         let userIdRef = user.remoteIdentifier!.transportString().cString(using: .utf8)
         EstablishedCallHandler(conversationId: conversationIdRef, userId: userIdRef, contextRef: wireCallCenterRef)
+        XCTAssert(waitForAllGroupsToBeEmpty(withTimeout: 0.5))
     }
     
     func participantsChanged(user: ZMUser, establishedFlow: Bool) {
@@ -512,10 +514,9 @@ class CallingV3Tests : IntegrationTestBase {
         // (1) Other user calls
         // when
         otherStartCall(user: user)
-        XCTAssert(waitForAllGroupsToBeEmpty(withTimeout:0.5))
 
         // then
-        XCTAssertEqual(conversationUnderTest.conversationListIndicator, ZMConversationListIndicator.none)
+        XCTAssertEqual(conversationUnderTest.conversationListIndicator, .none)
         
         // (2) Self ignores call
         // and when
@@ -529,22 +530,69 @@ class CallingV3Tests : IntegrationTestBase {
         if let change = convObserver!.notifications.lastObject as? ConversationChangeInfo {
             XCTAssertTrue(change.conversationListIndicatorChanged)
         }
-        XCTAssertEqual(conversationUnderTest.conversationListIndicator, ZMConversationListIndicator.inactiveCall)
+        XCTAssertEqual(conversationUnderTest.conversationListIndicator, .inactiveCall)
         
         // (2) Other user ends call
         // and when
         closeCall(user: user, reason: .canceled)
-        XCTAssert(waitForAllGroupsToBeEmpty(withTimeout:0.5))
-        spinMainQueue(withTimeout: 0.5)
         
         // then
         XCTAssertEqual(convObserver!.notifications.count, 3)
         if let change = convObserver!.notifications.lastObject as? ConversationChangeInfo {
             XCTAssertTrue(change.conversationListIndicatorChanged)
         }
-        XCTAssertEqual(conversationUnderTest.conversationListIndicator, ZMConversationListIndicator.none)
+        XCTAssertEqual(conversationUnderTest.conversationListIndicator, .none)
     }
 
+    func testThatItFiresAConversationChangeNotificationWhenAGroupCallIsJoined() {
+        // given
+        XCTAssertTrue(logInAndWaitForSyncToBeComplete())
+        useGroupConversation = true
+        
+        let user = conversationUnderTest.otherActiveParticipants.firstObject as! ZMUser
+        let convObserver = ConversationChangeObserver(conversation: conversationUnderTest)
+        
+        // (1) Other user calls
+        // when
+        otherStartCall(user: user)
+        
+        // then
+        XCTAssertEqual(conversationUnderTest.conversationListIndicator, .none)
+        
+        // (2) Self joins the call
+        // and when
+        selfJoinCall(isStart: false)
+        otherJoinCall(user: localSelfUser)
+
+        // then
+        XCTAssertEqual(convObserver!.notifications.count, 2)
+        if let change = convObserver!.notifications.lastObject as? ConversationChangeInfo {
+            XCTAssertTrue(change.conversationListIndicatorChanged)
+        }
+        XCTAssertEqual(conversationUnderTest.conversationListIndicator, .activeCall)
+        
+        // (3) selfUser user ends call
+        // and when
+        selfDropCall()
+        
+        // then
+        XCTAssertEqual(convObserver!.notifications.count, 3)
+        if let change = convObserver!.notifications.lastObject as? ConversationChangeInfo {
+            XCTAssertTrue(change.conversationListIndicatorChanged)
+        }
+        XCTAssertEqual(conversationUnderTest.conversationListIndicator, .inactiveCall)
+        
+        // (4) other user ends call
+        // and when
+        closeCall(user: localSelfUser, reason: .canceled)
+        
+        // then
+        XCTAssertEqual(convObserver!.notifications.count, 4)
+        if let change = convObserver!.notifications.lastObject as? ConversationChangeInfo {
+            XCTAssertTrue(change.conversationListIndicatorChanged)
+        }
+        XCTAssertEqual(conversationUnderTest.conversationListIndicator, .none)
+    }
     
 }
 

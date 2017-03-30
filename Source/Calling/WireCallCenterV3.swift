@@ -128,8 +128,8 @@ public enum CallState : Equatable {
         }
     }
     
-    func postNotificationOnMain(conversationID: UUID, userID: UUID?, completion: ((Void) -> Void)? = nil){
-        DispatchQueue.main.async {
+    func postNotificationOnMain(conversationID: UUID, userID: UUID?, uiMOC: NSManagedObjectContext, completion: ((Void) -> Void)? = nil){
+        uiMOC.performGroupedBlock {
             WireCallCenterCallStateNotification(callState: self,
                                                 conversationId: conversationID,
                                                 userId: userID).post()
@@ -158,7 +158,7 @@ public enum CallState : Equatable {
 }
 
 // TODO Sabine turn into struct when ChangedIndexes works in Swift
-public class CallMember : Hashable {
+public struct CallMember : Hashable {
 
     let remoteId : UUID
     let audioEstablished : Bool
@@ -362,6 +362,7 @@ private typealias WireCallMessageToken = UnsafeMutableRawPointer
     }
     
     var avsWrapper : AVSWrapperType!
+    weak var uiMOC : NSManagedObjectContext!
     
     public var useAudioConstantBitRate: Bool = false {
         didSet {
@@ -373,8 +374,9 @@ private typealias WireCallMessageToken = UnsafeMutableRawPointer
         avsWrapper.close()
     }
     
-    public required init(userId: UUID, clientId: String, avsWrapper: AVSWrapperType? = nil) {
+    public required init(userId: UUID, clientId: String, avsWrapper: AVSWrapperType? = nil, uiMOC: NSManagedObjectContext) {
         self.selfUserId = userId
+        self.uiMOC = uiMOC
         super.init()
         
         if WireCallCenterV3.activeInstance != nil {
@@ -397,23 +399,27 @@ private typealias WireCallMessageToken = UnsafeMutableRawPointer
         })
         
         let currentState = callState(conversationId: conversationId)
-        currentState.postNotificationOnMain(conversationID: conversationId, userID: userId)
+        if let uiMOC = uiMOC {
+            currentState.postNotificationOnMain(conversationID: conversationId, userID: userId, uiMOC: uiMOC)
+        }
 
         return 0
     }
     
     fileprivate func handleCallState(callState: CallState, conversationId: UUID, userId: UUID?) {
         callState.logState()
+        guard let uiMOC = uiMOC else { return }
+
         switch callState {
         case .established:
-            callState.postNotificationOnMain(conversationID: conversationId, userID: userId){
+            callState.postNotificationOnMain(conversationID: conversationId, userID: userId, uiMOC: uiMOC){
                 self.establishedDate = Date()
             }
         case .incoming(video: _, shouldRing: let shouldRing):
             updatedSnapshotsForIncomingCall(conversationId: conversationId, userId: userId!, shouldRing: shouldRing)
-            callState.postNotificationOnMain(conversationID: conversationId, userID: userId)
+            callState.postNotificationOnMain(conversationID: conversationId, userID: userId, uiMOC: uiMOC)
         default:
-            callState.postNotificationOnMain(conversationID: conversationId, userID: userId)
+            callState.postNotificationOnMain(conversationID: conversationId, userID: userId, uiMOC: uiMOC)
         }
     }
     
@@ -432,7 +438,7 @@ private typealias WireCallMessageToken = UnsafeMutableRawPointer
     fileprivate func missed(conversationId: UUID, userId: UUID, timestamp: Date, isVideoCall: Bool) {
         zmLog.debug("missed call")
         
-        DispatchQueue.main.async {
+        uiMOC?.performGroupedBlock {
             WireCallCenterMissedCallNotification(conversationId: conversationId, userId:userId, timestamp: timestamp, video: isVideoCall).post()
         }
     }

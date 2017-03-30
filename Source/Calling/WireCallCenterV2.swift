@@ -342,7 +342,7 @@ extension WireCallCenterV2 {
             else { return }
             
             if note.conversationId == remoteID {
-                strongObserver.voiceChannelParticipantsDidChange(note.setChangeInfo)
+                strongObserver.voiceChannelParticipantsDidChange(note)
             }
         }
     }

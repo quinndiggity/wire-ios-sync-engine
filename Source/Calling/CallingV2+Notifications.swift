@@ -122,15 +122,40 @@ struct VoiceChannelStateNotification {
 
 @objc
 public protocol VoiceChannelParticipantObserver : class {
-    func voiceChannelParticipantsDidChange(_ changeInfo : SetChangeInfo)
+    func voiceChannelParticipantsDidChange(_ changeInfo : VoiceChannelParticipantNotification)
 }
 
-struct VoiceChannelParticipantNotification {
+public class VoiceChannelParticipantNotification : NSObject {
 
     static let notificationName = Notification.Name("VoiceChannelParticipantNotification")
     static let userInfoKey = notificationName.rawValue
-    let setChangeInfo : SetChangeInfo
+    let setChangeInfoV2 : SetChangeInfoV2<CallMember>?
+    let setChangeInfo: SetChangeInfo?
     let conversationId : UUID
+
+    init(setChangeInfo: SetChangeInfo? = nil, setChangeInfoV2: SetChangeInfoV2<CallMember>? = nil, conversationId: UUID) {
+        if setChangeInfoV2 == nil && setChangeInfo == nil {
+            fatalError("One of the two should be set")
+        }
+        self.setChangeInfoV2 = setChangeInfoV2
+        self.setChangeInfo = setChangeInfo
+        self.conversationId = conversationId
+    }
+    
+    public var insertedIndexes : IndexSet { return setChangeInfoV2?.insertedIndexes ?? setChangeInfo?.insertedIndexes ?? IndexSet()}
+    public var deletedIndexes : IndexSet { return setChangeInfoV2?.deletedIndexes ?? setChangeInfo?.deletedIndexes ?? IndexSet()}
+    public var updatedIndexes : IndexSet { return setChangeInfoV2?.updatedIndexes ?? setChangeInfo?.updatedIndexes ?? IndexSet()}
+    public func enumerateMovedIndexes(_ block:@escaping (_ from: UInt, _ to : UInt) -> Void) {
+        if let changeInfo = setChangeInfo {
+            changeInfo.enumerateMovedIndexes(block)
+        } else if let changeInfo = setChangeInfoV2 {
+            changeInfo.enumerateMovedIndexes(block)
+        }
+    }
+    
+    open var movedIndexPairs : [ZMMovedIndex] {
+        return setChangeInfo?.movedIndexPairs ?? setChangeInfoV2?.movedIndexPairs ?? []
+    }
     
     func post() {
         NotificationCenter.default.post(name: VoiceChannelParticipantNotification.notificationName,

@@ -114,8 +114,8 @@ public class WireCallCenterV3Mock : WireCallCenterV3 {
         return overridenCallingProtocol
     }
     
-    public required init(userId: UUID, clientId: String, avsWrapper: AVSWrapperType? = nil) {
-        super.init(userId: userId, clientId: clientId, avsWrapper: MockAVSWrapper(userId: userId, clientId: clientId, observer: nil))
+    public required init(userId: UUID, clientId: String, avsWrapper: AVSWrapperType? = nil, uiMOC: NSManagedObjectContext) {
+        super.init(userId: userId, clientId: clientId, avsWrapper: MockAVSWrapper(userId: userId, clientId: clientId, observer: nil), uiMOC: uiMOC)
     }
 
     public func update(callState : CallState, conversationId: UUID, userId: UUID? = nil) {

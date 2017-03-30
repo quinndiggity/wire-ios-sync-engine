@@ -29,7 +29,7 @@ class WireCallCenterV3Tests: MessagingTest {
         super.setUp()
         selfUserID = UUID()
         clientID = "foo"
-        sut = WireCallCenterV3Mock(userId: selfUserID, clientId: clientID)
+        sut = WireCallCenterV3Mock(userId: selfUserID, clientId: clientID, uiMOC: uiMOC)
     }
     
     override func tearDown() {
