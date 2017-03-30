@@ -28,6 +28,7 @@
 #import "ZMUserSession+Background.h"
 
 #import "ZMUserSession+Internal.h"
+#import "ZMUserSession+OperationLoop.h"
 #import "ZMSyncStrategy.h"
 #import "NSError+ZMUserSessionInternal.h"
 #import "ZMCredentials.h"
@@ -398,7 +399,7 @@ ZM_EMPTY_ASSERTING_INIT()
         [self registerForBackgroundNotifications];
         [self registerForRequestToOpenConversationNotification];
         
-        [self.syncManagedObjectContext performBlockAndWait:^{
+        [self.syncManagedObjectContext performGroupedBlockAndWait:^{
             [self enablePushNotifications];
         }];
         [self enableBackgroundFetch];
