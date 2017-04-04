@@ -70,9 +70,39 @@ extension CallStateObserver : WireCallCenterCallStateObserver, WireCallCenterMis
                 self.localNotificationDispatcher.process(callState: callState, in: conversation, sender: user)
             }
             
+            // The conversationListIndicator might have changed due to the changed callState, we need to notify the UI about it
+            self.updateConversation(convObjectID: conversation.objectID, callState: callState)
+            
             self.callingSystemMessageGenerator.process(callState: callState, in: conversation, sender: user)
             self.managedObjectContext.enqueueDelayedSave()
         }
+    }
+    
+    public func updateConversation(convObjectID: NSManagedObjectID, callState: CallState){
+        if let uiMOC = self.managedObjectContext.zm_userInterface {
+            uiMOC.performGroupedBlock {
+                guard let uiConv = (try? uiMOC.existingObject(with: convObjectID)) as? ZMConversation else { return }
+                switch callState {
+                case .incoming(video: _, shouldRing: let shouldRing):
+                    uiConv.isIgnoringCallV3 = !shouldRing
+                    uiConv.isCallDeviceActiveV3 = false
+                case .terminating, .none:
+                    uiConv.isCallDeviceActiveV3 = false
+                    uiConv.isIgnoringCallV3 = false
+                case .outgoing, .answered, .established:
+                    uiConv.isCallDeviceActiveV3 = true
+                case .unknown:
+                    break
+                }
+
+                if uiMOC.zm_hasChanges {
+                    NotificationDispatcher.notifyNonCoreDataChanges(objectID: uiConv.objectID,
+                                                                    changedKeys: [ZMConversationListIndicatorKey],
+                                                                    uiContext: uiMOC)
+                }
+            }
+        }
+    
     }
     
     public func callCenterMissedCall(conversationId: UUID, userId: UUID, timestamp: Date, video: Bool) {
@@ -106,7 +136,6 @@ extension CallStateObserver : WireCallCenterCallStateObserver, WireCallCenterMis
             break
         }
     }
-    
 }
 
 private final class CallingSystemMessageGenerator {

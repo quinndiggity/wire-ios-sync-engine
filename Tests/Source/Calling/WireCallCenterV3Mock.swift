@@ -42,21 +42,23 @@ class MockAVSWrapper : AVSWrapperType {
         return mockCallState
     }
     
-    func startCall(conversationId: UUID, video: Bool) -> Bool {
+
+    func startCall(conversationId: UUID, video: Bool, isGroup: Bool) -> Bool {
         didCallStartCall = true
         return !startCallShouldFail
     }
     
-    func answerCall(conversationId: UUID) -> Bool {
+    
+    func answerCall(conversationId: UUID, isGroup: Bool) -> Bool {
         didCallAnswerCall = true
         return !answerCallShouldFail
     }
     
-    func endCall(conversationId: UUID) {
+    func endCall(conversationId: UUID, isGroup: Bool) {
         didCallEndCall = true
     }
     
-    func rejectCall(conversationId: UUID) {
+    func rejectCall(conversationId: UUID, isGroup: Bool) {
         didCallRejectCall = true
     }
     
